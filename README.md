@@ -29,6 +29,10 @@ python -m smolagents_audit
 
 整体判定：**FAIL** —— 有 7 项与宣传/预期直接矛盾。
 
+> **跨平台一致性**：CI 在 3 OS × 2 Python（6 个环境）上跑同一套用例，
+> 结论完全相同 —— 同一组 7 项 MISMATCH，同一组 3 项 PARTIAL。
+> 这些发现不是某个平台的怪癖。
+
 ### 宣传声明核验
 
 | ID | 声明 | 状态 | 实测证据 |
@@ -205,4 +209,5 @@ docs/SAMPLE_REPORT.md  # 本机实测输出快照
 MIT。本项目是独立核验工具，与 Hugging Face 无关联。
 
 核验对象：`smolagents` 1.26.0（Apache-2.0）。
-所有结论基于 2026-10-19 的实测，上游版本更新后需重跑。
+所有结论基于 2026-10-19 的实测，并在 GitHub Actions 的 3 OS × 2 Python 上复现一致。
+上游版本更新后需重跑。
