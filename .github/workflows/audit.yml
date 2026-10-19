@@ -1,0 +1,61 @@
+name: audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Re-run weekly: the findings are version-specific, so drift matters.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[libs,dev]"
+
+      - name: Suite self-tests
+        run: pytest tests/ -q
+
+      - name: Run audit (report only)
+        run: python -m smolagents_audit --json report.json --md report.md
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            report.json
+            report.md
+
+  # Separate job: gate on MISMATCH. Kept out of the matrix so a known
+  # platform-specific finding cannot hide a regression elsewhere.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[libs,dev]"
+      - name: Fail if claims do not hold
+        run: python -m smolagents_audit --quiet --claims --fail-on MISMATCH
