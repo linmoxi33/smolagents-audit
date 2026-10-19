@@ -123,3 +123,118 @@ def test_all_cases_have_evidence(results):
     for cid, r in results.items():
         assert r.evidence, f"{cid} 缺证据"
         assert len(r.evidence) > 20, f"{cid} 证据过短"
+
+
+# ---------- 跨平台输出编码 ----------
+
+
+class _NarrowStream:
+    """只接受 ASCII 的输出流，模拟 Windows CI 的 cp1252 控制台。
+
+    真实 stdout 是 TextIOWrapper；这里故意在 write 时抛 UnicodeEncodeError，
+    因为 reconfigure() 无法作用于自定义流，正好用来验证兜底路径。
+    """
+
+    encoding = "ascii"
+
+    def __init__(self) -> None:
+        self.chunks: list[str] = []
+
+    def write(self, s: str) -> int:
+        s.encode("ascii")  # 非 ASCII 就抛 UnicodeEncodeError
+        self.chunks.append(s)
+        return len(s)
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def reconfigure(self, **kwargs) -> None:
+        # 自定义流不支持 reconfigure，模拟 AttributeError 分支
+        raise AttributeError("cannot reconfigure")
+
+
+def test_cli_survives_non_utf8_console(monkeypatch):
+    """报告含中文，必须能在窄编码控制台下打印而不崩。
+
+    Windows CI 默认代码页 cp1252，曾因此让 audit 整体退出 1 —— 一个与被审计
+    对象完全无关的失败。这里用只接受 ASCII 的流复现。
+    """
+    from smolagents_audit.cli import main
+
+    narrow = _NarrowStream()
+    monkeypatch.setattr("sys.stdout", narrow)
+
+    # 不传 --quiet：必须真的走打印路径
+    rc = main(["--claims"])
+    assert rc == 0
+    assert narrow.chunks, "应当有输出；否则没测到打印路径"
+    # 兜底后写出的内容必须能过 ASCII 编码
+    "".join(narrow.chunks).encode("ascii")
+
+
+def test_narrow_stream_would_break_without_guard():
+    """对照组：证明上面的测试有区分力。
+
+    直接往窄流写中文必须抛错，否则 test_cli_survives_non_utf8_console 是空转。
+    """
+    import pytest
+
+    narrow = _NarrowStream()
+    with pytest.raises(UnicodeEncodeError):
+        narrow.write("有效代码 1255 行")
+
+
+def test_render_console_contains_non_ascii():
+    """确认报告里确实有非 ASCII 内容——否则编码测试无意义。"""
+    from smolagents_audit.model import CaseResult, Report, Status
+    from smolagents_audit.reporters.render import render_console
+
+    r = Report(subject="x", version="1", environment={"python": "3.13", "platform": "w", "docker": False, "deno": False})
+    r.add(CaseResult("C1", "「约 1,000 行」", Status.PARTIAL, "有效代码 1255 行"))
+    text = render_console(r)
+    assert any(ord(ch) > 127 for ch in text), "报告应含中文，否则编码测试无意义"
+
+
+# ---------- 回归门禁 ----------
+
+
+def test_baseline_lists_all_current_mismatches():
+    """基线必须覆盖当前所有 MISMATCH，否则 CI 首次就会误报为回归。"""
+    from smolagents_audit.baseline import load
+    from smolagents_audit.claim_suite import ClaimSuite
+    from smolagents_audit.sandbox_suite import SandboxSuite
+
+    known = set(load()["known_mismatches"])
+
+    claims = ClaimSuite().run()
+    suite = SandboxSuite()
+    try:
+        sandbox = suite.run()
+    finally:
+        suite.cleanup()
+
+    current = {c.case_id for c in claims + sandbox if c.status.value == "MISMATCH"}
+    unregistered = current - known
+    assert not unregistered, (
+        f"以下 MISMATCH 未登记到 baseline.json，CI 会误报为回归：{sorted(unregistered)}"
+    )
+
+
+def test_baseline_has_no_stale_entries():
+    """基线不应包含已经不存在的用例 ID，否则会掩盖同名新问题。"""
+    from smolagents_audit.baseline import load
+    from smolagents_audit.claim_suite import ClaimSuite
+    from smolagents_audit.sandbox_suite import SandboxSuite
+
+    known = set(load()["known_mismatches"])
+    suite = SandboxSuite()
+    try:
+        ids = {c.case_id for c in ClaimSuite().run() + suite.run()}
+    finally:
+        suite.cleanup()
+
+    stale = known - ids
+    assert not stale, f"baseline.json 中有已不存在的用例：{sorted(stale)}"

@@ -1,0 +1,12 @@
+{
+  "smolagents": "1.26.0",
+  "known_mismatches": [
+    "B1",
+    "B2",
+    "B3",
+    "C11",
+    "C8",
+    "E1",
+    "E2"
+  ]
+}

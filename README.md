@@ -146,11 +146,15 @@ python -m smolagents_audit --sandbox
 # 出报告
 python -m smolagents_audit --json report.json --md report.md
 
-# CI 门禁：出现 MISMATCH 或 GAP 就失败
+# 回归门禁：只对 baseline.json 未登记的新问题失败
+# （本审计的职责就是找出问题，对已知问题反复报红只会让人忽略红色）
+python -m smolagents_audit --quiet --fail-on-new
+
+# 严格模式：任何 MISMATCH 都失败
 python -m smolagents_audit --fail-on MISMATCH,GAP
 ```
 
-退出码：`0` 正常，`1` 命中 `--fail-on` 指定的状态。
+退出码：`0` 正常，`1` 命中门禁。
 
 ### 判定不依赖「是否抛异常」
 
@@ -185,10 +189,13 @@ smolagents_audit/
   model.py          # 6 档状态 + 报告 + verdict 逻辑
   claim_suite.py    # 11 条宣传声明 → 可执行断言
   sandbox_suite.py  # 20 条隔离用例（A/B/E/D/X 五组）
+  baseline.py       # 已知问题台账（CI 只对新增失败）
   cli.py            # 命令行入口
   reporters/        # 终端 + Markdown 渲染
 tests/
-  test_suite_logic.py  # 13 项，测「判定逻辑本身是否可靠」
+  test_suite_logic.py  # 18 项，测「判定逻辑本身是否可靠」
+baseline.json          # 7 项已登记的 MISMATCH
+docs/SAMPLE_REPORT.md  # 本机实测输出快照
 ```
 
 ---
